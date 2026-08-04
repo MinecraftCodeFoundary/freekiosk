@@ -110,8 +110,10 @@ class MainActivity : ReactActivity() {
     // Request Android 13+ WiFi scan permission for visible SSID results
     requestWifiPermissions()
 
-    // Request camera permission for motion detection
-    requestCameraPermission()
+    // Request camera/microphone permissions before WebView getUserMedia() calls.
+    // MODIFY_AUDIO_SETTINGS is a normal manifest permission, but RECORD_AUDIO is a
+    // dangerous runtime permission and must be granted separately.
+    requestMediaPermissions()
 
     // Adjust content padding when the soft keyboard appears.
     // In immersive/kiosk mode adjustResize is ignored, so we listen for IME insets
@@ -223,10 +225,33 @@ class MainActivity : ReactActivity() {
     }
   }
 
-  private fun requestCameraPermission() {
+  private fun requestMediaPermissions() {
+    val needed = mutableListOf<String>()
     if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
         != PackageManager.PERMISSION_GRANTED) {
-      ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 1002)
+      needed.add(Manifest.permission.CAMERA)
+    }
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+        != PackageManager.PERMISSION_GRANTED) {
+      needed.add(Manifest.permission.RECORD_AUDIO)
+    }
+    if (needed.isEmpty()) return
+
+    if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
+      needed.forEach { permission ->
+        try {
+          devicePolicyManager.setPermissionGrantState(
+            adminComponent,
+            packageName,
+            permission,
+            DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+          )
+        } catch (e: Exception) {
+          DebugLog.d("MainActivity", "Could not grant media permission $permission: ${e.message}")
+        }
+      }
+    } else {
+      ActivityCompat.requestPermissions(this, needed.toTypedArray(), 1002)
     }
   }
 
