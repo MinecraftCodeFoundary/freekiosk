@@ -10,6 +10,7 @@ import {
   ScrollView,
   Linking,
   NativeModules,
+  requireNativeComponent,
   findNodeHandle
 } from 'react-native';
 
@@ -25,6 +26,10 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+
+// Keep react-native-webview's JS wrapper while selecting the app-owned Android
+// view manager that installs window.Android before the first page starts loading.
+const FreeKioskNativeWebView = requireNativeComponent<any>('FreeKioskWebView');
 
 interface WebViewComponentProps {
   url: string;
@@ -935,6 +940,7 @@ const WebViewComponent = forwardRef<WebViewComponentRef, WebViewComponentProps>(
     <View style={styles.container} ref={containerViewRef}>
       <WebView
         ref={webViewRef}
+        nativeConfig={{ component: FreeKioskNativeWebView }}
         source={{ uri: error ? 'about:blank' : url }}
         style={styles.webview}
         
