@@ -10,6 +10,7 @@ import {
   SettingsButton,
   SettingsInfoBox,
   BackupRestoreSection,
+  RemoteConfigSection,
 } from '../../../components/settings';
 import { ApiSettingsSection } from '../../../components/ApiSettingsSection';
 import { MqttSettingsSection } from '../../../components/MqttSettingsSection';
@@ -298,6 +299,9 @@ const AdvancedTab: React.FC<AdvancedTabProps> = ({
         )}
       </SettingsSection>
       )}
+
+      {/* Remote Configuration */}
+      <RemoteConfigSection onApplyComplete={onRestoreComplete} />
 
       {/* Backup & Restore */}
       <BackupRestoreSection onRestoreComplete={onRestoreComplete} />

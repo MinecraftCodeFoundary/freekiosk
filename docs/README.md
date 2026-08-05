@@ -87,6 +87,7 @@ adb shell dpm set-device-owner com.freekiosk/.DeviceAdminReceiver
 | **Integrations Overview** | Choose between REST API and MQTT | [Read →](Integrations) |
 | **REST API** | 40+ HTTP endpoints for device control | [Read →](REST-API) |
 | **MQTT** | Real-time telemetry and Home Assistant discovery | [Read →](MQTT) |
+| **Remote Configuration** | Sync an explicit settings allowlist from HTTPS JSON | [Read →](remote-configuration.md) |
 | **ADB Configuration** | Headless provisioning and scripting | [Read →](ADB-Configuration) |
 
 ### Advanced Topics

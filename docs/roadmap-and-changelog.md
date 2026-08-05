@@ -159,7 +159,7 @@
 | **Enhanced Media** | Planned | Advanced playback controls |
 | **Auto-brightness** | Planned | Sensor-based adjustment |
 | **Advanced Analytics** | Planned | Usage metrics |
-| **Remote Configuration** | Planned | Web-based setup |
+| **Remote Configuration** | Implemented | URL-based JSON sync with ETag and optional Bearer token |
 | **Content Filtering** | Planned | URL whitelist/blacklist |
 | **App Management** | Planned | External app control |
 | **Enhanced Notifications** | Planned | Custom alerts |

@@ -69,6 +69,7 @@ adb shell dpm set-device-owner com.freekiosk/.DeviceAdminReceiver
 | Integrate with Home Assistant | [Integrations Overview](docs/INTEGRATIONS.md) |
 | Use API endpoints | [REST API Docs](docs/rest-api.md) |
 | Configure MQTT topics/discovery | [MQTT Docs](docs/MQTT.md) |
+| Manage settings from a remote URL | [Remote Configuration](docs/remote-configuration.md) |
 | Provision with scripts | [ADB Configuration](docs/adb-configuration.md) |
 | Follow release direction | [Roadmap and Changelog](docs/roadmap-and-changelog.md) |
 | Contribute code | [Development Guide](docs/development.md) |

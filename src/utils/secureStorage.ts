@@ -9,6 +9,7 @@ const { KioskModule } = NativeModules;
 const PIN_SERVICE = 'freekiosk_pin';
 const API_KEY_SERVICE = 'freekiosk_api_key';
 const MQTT_PASSWORD_SERVICE = 'freekiosk_mqtt_password';
+const REMOTE_CONFIG_TOKEN_SERVICE = 'freekiosk_remote_config_token';
 const WIFI_PASSWORD_SERVICE_PREFIX = 'freekiosk_wifi_password:';
 const BASIC_AUTH_PASSWORD_SERVICE = 'freekiosk_basic_auth_password';
 const LEGACY_API_KEY = '@kiosk_rest_api_key'; // Legacy AsyncStorage key for migration
@@ -824,6 +825,71 @@ export async function clearSecureMqttPassword(): Promise<void> {
     console.log('[SecureStorage] MQTT password cleared');
   } catch (error) {
     console.error('[SecureStorage] Error clearing MQTT password:', error);
+  }
+}
+
+// ============================================
+// REMOTE CONFIGURATION TOKEN SECURE STORAGE
+// ============================================
+
+const getRemoteConfigTokenOrigin = (sourceUrl: string): string | null => {
+  try {
+    const parsed = new URL(sourceUrl) as unknown as { origin: string };
+    return parsed.origin || null;
+  } catch {
+    return null;
+  }
+};
+
+export async function saveSecureRemoteConfigToken(
+  token: string,
+  sourceUrl: string,
+): Promise<boolean> {
+  try {
+    const normalized = token.trim();
+    const origin = getRemoteConfigTokenOrigin(sourceUrl);
+    if (!origin) return false;
+    if (!normalized) {
+      await clearSecureRemoteConfigToken();
+      return true;
+    }
+    if (normalized.length > 4096 || normalized.includes('\r') || normalized.includes('\n')) {
+      return false;
+    }
+    await Keychain.setGenericPassword(origin, normalized, {
+      service: REMOTE_CONFIG_TOKEN_SERVICE,
+      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+    });
+    return true;
+  } catch (error) {
+    console.error('[SecureStorage] Error saving remote config token:', error);
+    return false;
+  }
+}
+
+export async function getSecureRemoteConfigToken(sourceUrl: string): Promise<string> {
+  try {
+    const origin = getRemoteConfigTokenOrigin(sourceUrl);
+    if (!origin) return '';
+    const credentials = await Keychain.getGenericPassword({
+      service: REMOTE_CONFIG_TOKEN_SERVICE,
+    });
+    // Credentials written by early builds used a constant username and are
+    // intentionally ignored until the user saves them again for a URL origin.
+    return credentials && credentials.username === origin
+      ? credentials.password
+      : '';
+  } catch (error) {
+    console.error('[SecureStorage] Error getting remote config token:', error);
+    return '';
+  }
+}
+
+export async function clearSecureRemoteConfigToken(): Promise<void> {
+  try {
+    await Keychain.resetGenericPassword({ service: REMOTE_CONFIG_TOKEN_SERVICE });
+  } catch (error) {
+    console.error('[SecureStorage] Error clearing remote config token:', error);
   }
 }
 
