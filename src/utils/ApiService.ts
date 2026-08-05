@@ -58,6 +58,11 @@ export interface AppStatus {
   motionAlwaysOn?: boolean;
 }
 
+export interface IntegrationReloadOptions {
+  restApi: boolean;
+  mqtt: boolean;
+}
+
 class ApiServiceClass {
   private callbacks: ApiCallbacks = {};
   private eventEmitter: NativeEventEmitter | null = null;
@@ -74,6 +79,7 @@ class ApiServiceClass {
     motionDetected: false,
   };
   private isInitialized = false;
+  private integrationReloadQueue: Promise<void> = Promise.resolve();
 
   /**
    * Initialize the API service and start listening for commands
@@ -178,6 +184,44 @@ class ApiServiceClass {
     } catch (error) {
       console.error('ApiService: Failed to stop MQTT', error);
     }
+  }
+
+  /**
+   * Stop and restart only the long-lived integrations whose persisted
+   * configuration changed. Calls are serialized so startup and remote sync
+   * cannot race and leave a service running with stale settings.
+   */
+  reloadIntegrationsFromSettings(options: IntegrationReloadOptions): Promise<void> {
+    const nextReload = this.integrationReloadQueue
+      .catch(() => undefined)
+      .then(async () => {
+        if (options.restApi) {
+          try {
+            if (await httpServer.isRunning()) {
+              await httpServer.stopServer();
+            }
+            await this.autoStart();
+          } catch (error) {
+            console.error('ApiService: Failed to reload REST API settings', error);
+          }
+        }
+
+        if (options.mqtt) {
+          await this.stopMqtt();
+          try {
+            if (await StorageService.getMqttEnabled()) {
+              await this.autoStartMqtt();
+            } else {
+              console.log('ApiService: MQTT disabled in settings');
+            }
+          } catch (error) {
+            console.error('ApiService: Failed to reload MQTT settings', error);
+          }
+        }
+      });
+
+    this.integrationReloadQueue = nextReload;
+    return nextReload;
   }
 
   /**

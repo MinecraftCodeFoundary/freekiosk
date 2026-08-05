@@ -211,9 +211,11 @@
 | Feature | Description |
 |---|---|
 | **FreeKiosk Cloud** | MDM Dashboard |
-| **Remote Config** | Centralized management |
+| **Hosted Policy UI** | Cloud-managed configuration policies |
 | **Multi-device** | Fleet management |
 | **Analytics** | Usage insights |
+
+> URL-based JSON remote configuration is already implemented. See the [Remote Configuration guide](remote-configuration.md). The v2.x item refers to an optional hosted fleet-management interface.
 
 > See full [Roadmap](../README.md#roadmap).
 

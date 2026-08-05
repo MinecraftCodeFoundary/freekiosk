@@ -28,6 +28,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import Icon from '../components/Icon';
 import { revokeSettingsAccess } from '../utils/authState';
+import { syncRemoteConfig } from '../utils/RemoteConfigService';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const { HttpServerModule } = NativeModules;
@@ -92,7 +93,26 @@ const KioskScreen: React.FC<KioskScreenProps> = ({ navigation }) => {
   const appStateRef = useRef(AppState.currentState);
   const appLaunchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isNavigatingToPinRef = useRef<boolean>(false); // Guard to prevent relaunch during 5-tap→PIN navigation
+  const focusRunIdRef = useRef(0);
   const bootAppsLaunchedRef = useRef<boolean>(false); // Boot apps launched once per app session (never on Settings/PIN return)
+  const loadSettingsRef = useRef<() => Promise<void>>(async () => {});
+  const loadSettingsInFlightRef = useRef<Promise<void> | null>(null);
+
+  // loadSettings has native side effects, so coalesce remote-triggered reloads.
+  const requestLoadSettings = useCallback((): Promise<void> => {
+    if (loadSettingsInFlightRef.current) {
+      return loadSettingsInFlightRef.current;
+    }
+
+    let inFlight: Promise<void>;
+    inFlight = loadSettingsRef.current().finally(() => {
+      if (loadSettingsInFlightRef.current === inFlight) {
+        loadSettingsInFlightRef.current = null;
+      }
+    });
+    loadSettingsInFlightRef.current = inFlight;
+    return inFlight;
+  }, []);
   const tapCountRef = useRef<number>(0);
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
@@ -243,6 +263,29 @@ const KioskScreen: React.FC<KioskScreenProps> = ({ navigation }) => {
           console.log('[KioskScreen] AppState: skipping relaunch (screensaver active)');
           return;
         }
+        if (isScheduledSleepRef.current) {
+          return;
+        }
+        if (!navigation.isFocused()) {
+          return;
+        }
+
+        try {
+          const remoteResult = await syncRemoteConfig({ trigger: 'foreground' });
+          if (
+            remoteResult.applied &&
+            navigation.isFocused() &&
+            AppState.currentState === 'active'
+          ) {
+            await requestLoadSettings();
+            return;
+          }
+        } catch (error) {
+          console.warn('[KioskScreen] Foreground remote config sync failed:', error);
+        }
+        if (!navigation.isFocused() || AppState.currentState !== 'active') {
+          return;
+        }
         
         try {
           // CRITICAL: Read current mode from storage to avoid stale closure values
@@ -316,7 +359,7 @@ const KioskScreen: React.FC<KioskScreenProps> = ({ navigation }) => {
         clearTimeout(appLaunchTimeoutRef.current);
       }
     };
-  }, []);  // No dependencies — reads fresh values from storage every time
+  }, [navigation, requestLoadSettings]);
 
   // Block Android back gesture on Kiosk screen & ensure settings access is revoked (#93).
   // When the user returns to Kiosk (after save or navigation.reset), the back gesture
@@ -725,21 +768,14 @@ const KioskScreen: React.FC<KioskScreenProps> = ({ navigation }) => {
           // it forward first; loadSettings() then rebuilds the target mode (for external_app
           // it re-launches the app over us). No-op when already in the foreground.
           await KioskModule.bringToFront().catch(() => {});
-          await loadSettings();
+          await requestLoadSettings();
           console.log('[API] Switched to', mode, 'mode', target ?? '');
         },
       });
       
-      // Auto-start the API server if enabled
-      await ApiService.autoStart();
-
-      // Auto-start MQTT client if enabled
-      try {
-        await ApiService.autoStartMqtt();
-      } catch (e) {
-        // Expected when MQTT is disabled or not configured
-        console.log('ApiService: MQTT auto-start skipped:', (e as Error).message);
-      }
+      // Serialize initial native integration startup with any remote-triggered
+      // reload so stale pre-sync settings cannot win a startup race.
+      await ApiService.reloadIntegrationsFromSettings({ restApi: true, mqtt: true });
     };
 
     initApiService();
@@ -751,8 +787,10 @@ const KioskScreen: React.FC<KioskScreenProps> = ({ navigation }) => {
           const connected = await mqttClient.isConnected();
           if (!connected) {
             console.log('[KioskScreen] App returned to foreground, MQTT disconnected — reconnecting...');
-            await ApiService.stopMqtt();
-            await ApiService.autoStartMqtt();
+            await ApiService.reloadIntegrationsFromSettings({
+              restApi: false,
+              mqtt: true,
+            });
           }
         } catch (e) {
           // MQTT not enabled or not configured, ignore
@@ -899,19 +937,28 @@ const KioskScreen: React.FC<KioskScreenProps> = ({ navigation }) => {
 
   useEffect(() => {
     const unsubscribeFocus = navigation.addListener('focus', async () => {
+      const focusRunId = focusRunIdRef.current + 1;
+      focusRunIdRef.current = focusRunId;
+      // A focus event means the previous PIN/settings flow has completed. Clear
+      // its old guard before syncing, but never clear a newer guard after await.
+      isNavigatingToPinRef.current = false;
+
       // HACK: Force AsyncStorage to check SharedPreferences migration
       // This triggers AsyncStorage to look for data in SharedPreferences and migrate it to SQLite
       try {
         await AsyncStorage.getItem('__force_init__');
       } catch (e) {}
-      
-      // Clear navigating-to-pin guard BEFORE loadSettings so that returning from
-      // PIN/Settings causes loadSettings to proceed with the external app launch.
-      // The guard's purpose (preventing a duplicate launch mid-5-tap-flow) is already
-      // served: by the time KioskScreen gains focus again, the PIN flow is complete.
-      isNavigatingToPinRef.current = false;
+      if (focusRunId !== focusRunIdRef.current || !navigation.isFocused()) return;
 
-      await loadSettings();
+      try {
+        await syncRemoteConfig({ trigger: 'startup' });
+      } catch (error) {
+        console.warn('[KioskScreen] Startup remote config sync failed:', error);
+      }
+      if (focusRunId !== focusRunIdRef.current || !navigation.isFocused()) return;
+
+      await requestLoadSettings();
+      if (focusRunId !== focusRunIdRef.current || !navigation.isFocused()) return;
       
       // Reload blocking overlays to ensure they stay active when returning from settings
       try {
@@ -935,6 +982,7 @@ const KioskScreen: React.FC<KioskScreenProps> = ({ navigation }) => {
     });
 
     const unsubscribeBlur = navigation.addListener('blur', async () => {
+      focusRunIdRef.current += 1;
       clearTimer();
       clearInactivityReturnTimer();
       setIsScreensaverActive(false);
@@ -970,8 +1018,40 @@ const KioskScreen: React.FC<KioskScreenProps> = ({ navigation }) => {
       unsubscribeFocus();
       unsubscribeBlur();
     };
-  }, [navigation]);
+  }, [navigation, requestLoadSettings]);
 
+
+  useEffect(() => {
+    if (!isFocused) return;
+
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      if (
+        cancelled ||
+        AppState.currentState !== 'active' ||
+        !navigation.isFocused() ||
+        isScheduledSleepRef.current
+      ) return;
+      try {
+        const remoteResult = await syncRemoteConfig({ trigger: 'interval' });
+        if (
+          !cancelled &&
+          remoteResult.applied &&
+          AppState.currentState === 'active' &&
+          navigation.isFocused()
+        ) {
+          await requestLoadSettings();
+        }
+      } catch (error) {
+        console.warn('[KioskScreen] Interval remote config sync failed:', error);
+      }
+    }, 60_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isFocused, navigation, requestLoadSettings]);
   // #180 — Tell native when the Kiosk screen is the active route, so the native
   // tap-to-settings fallback (MainActivity.dispatchTouchEvent) only counts taps
   // here and never while the user is inside Pin/Settings. Revert: delete this block.
@@ -1955,6 +2035,7 @@ const KioskScreen: React.FC<KioskScreenProps> = ({ navigation }) => {
     }
   };
 
+  loadSettingsRef.current = loadSettings;
   // #190 — Body of the inactivity expiry: optional motion pre-check, then activate the
   // screensaver. Extracted so it can be triggered by either the JS setTimeout (WebView/
   // media modes) or the native inactivity event (External App mode, where RN freezes JS

@@ -4,7 +4,19 @@ import { ScreenScheduleRule } from '../types/screenScheduler';
 import { DashboardTile } from '../types/dashboard';
 import { ManagedApp } from '../types/managedApps';
 import { MediaItem, MediaFitMode } from '../types/mediaPlayer';
-import { saveSecureApiKey, getSecureApiKey, clearSecureApiKey, clearSecureMqttPassword } from './secureStorage';
+import {
+  DEFAULT_REMOTE_CONFIG_PREFERENCES,
+  DEFAULT_REMOTE_CONFIG_STATE,
+  RemoteConfigPreferences,
+  RemoteConfigState,
+} from '../types/remoteConfig';
+import {
+  saveSecureApiKey,
+  getSecureApiKey,
+  clearSecureApiKey,
+  clearSecureMqttPassword,
+  clearSecureRemoteConfigToken,
+} from './secureStorage';
 
 const KEYS = {
   URL: '@kiosk_url',
@@ -174,6 +186,9 @@ const KEYS = {
   LOCKSCREEN_ROTATION_LOCK_ENABLED: '@kiosk_lockscreen_rotation_lock_enabled',
   // HTTP Basic Auth
   HTTP_BASIC_AUTH_USERNAME: '@kiosk_http_basic_auth_username',
+  // URL-based remote configuration source and synchronization metadata
+  REMOTE_CONFIG_PREFERENCES: '@kiosk_remote_config_preferences',
+  REMOTE_CONFIG_STATE: '@kiosk_remote_config_state',
 };
 
 export const StorageService = {
@@ -469,6 +484,9 @@ export const StorageService = {
         KEYS.LOCKSCREEN_ROTATION_LOCK_ENABLED,
         // HTTP Basic Auth
         KEYS.HTTP_BASIC_AUTH_USERNAME,
+        // Remote Configuration
+        KEYS.REMOTE_CONFIG_PREFERENCES,
+        KEYS.REMOTE_CONFIG_STATE,
         // Managed Apps
         KEYS.MANAGED_APPS,
         // Legacy keys
@@ -477,9 +495,10 @@ export const StorageService = {
         KEYS.MOTION_SENSITIVITY,
         KEYS.MOTION_DELAY,
       ]);
-      // Also clear secure API key and MQTT password from Keychain
+      // Also clear credentials from Keychain
       await clearSecureApiKey();
       await clearSecureMqttPassword();
+      await clearSecureRemoteConfigToken();
     } catch (error) {
       console.error('Error clearing all storage keys:', error);
     }
@@ -2731,6 +2750,93 @@ export const StorageService = {
     } catch (error) {
       console.error('Error getting HTTP basic auth username:', error);
       return '';
+    }
+  },
+
+  saveRemoteConfigPreferences: async (preferences: RemoteConfigPreferences): Promise<void> => {
+    try {
+      const interval = Number(preferences.checkIntervalMinutes);
+      const normalized: RemoteConfigPreferences = {
+        enabled: preferences.enabled === true,
+        url: typeof preferences.url === 'string' ? preferences.url.trim() : '',
+        allowInsecureHttp: preferences.allowInsecureHttp === true,
+        checkIntervalMinutes: Number.isFinite(interval)
+          ? Math.min(1440, Math.max(1, Math.round(interval)))
+          : DEFAULT_REMOTE_CONFIG_PREFERENCES.checkIntervalMinutes,
+      };
+      await AsyncStorage.setItem(
+        KEYS.REMOTE_CONFIG_PREFERENCES,
+        JSON.stringify(normalized),
+      );
+    } catch (error) {
+      console.error('Error saving remote config preferences:', error);
+      throw error;
+    }
+  },
+
+  getRemoteConfigPreferences: async (): Promise<RemoteConfigPreferences> => {
+    try {
+      const value = await AsyncStorage.getItem(KEYS.REMOTE_CONFIG_PREFERENCES);
+      if (value === null) {
+        return { ...DEFAULT_REMOTE_CONFIG_PREFERENCES };
+      }
+
+      const parsed = JSON.parse(value) as Partial<RemoteConfigPreferences>;
+      const interval = Number(parsed?.checkIntervalMinutes);
+      return {
+        enabled: parsed?.enabled === true,
+        url: typeof parsed?.url === 'string' ? parsed.url : '',
+        allowInsecureHttp: parsed?.allowInsecureHttp === true,
+        checkIntervalMinutes: Number.isFinite(interval)
+          ? Math.min(1440, Math.max(1, Math.round(interval)))
+          : DEFAULT_REMOTE_CONFIG_PREFERENCES.checkIntervalMinutes,
+      };
+    } catch (error) {
+      console.error('Error getting remote config preferences:', error);
+      return { ...DEFAULT_REMOTE_CONFIG_PREFERENCES };
+    }
+  },
+
+  saveRemoteConfigState: async (state: RemoteConfigState): Promise<void> => {
+    try {
+      await AsyncStorage.setItem(KEYS.REMOTE_CONFIG_STATE, JSON.stringify(state));
+    } catch (error) {
+      console.error('Error saving remote config state:', error);
+      throw error;
+    }
+  },
+
+  getRemoteConfigState: async (): Promise<RemoteConfigState> => {
+    try {
+      const value = await AsyncStorage.getItem(KEYS.REMOTE_CONFIG_STATE);
+      if (value === null) {
+        return { ...DEFAULT_REMOTE_CONFIG_STATE };
+      }
+
+      const parsed = JSON.parse(value) as Partial<RemoteConfigState>;
+      if (!parsed || typeof parsed !== 'object') {
+        return { ...DEFAULT_REMOTE_CONFIG_STATE };
+      }
+      return {
+        ...DEFAULT_REMOTE_CONFIG_STATE,
+        ...parsed,
+        sourceUrl: typeof parsed.sourceUrl === 'string' ? parsed.sourceUrl : null,
+        lastResult:
+          parsed.lastResult === 'success' ||
+          parsed.lastResult === 'not_modified' ||
+          parsed.lastResult === 'error'
+            ? parsed.lastResult
+            : 'never',
+        lastCheckedAt: typeof parsed.lastCheckedAt === 'string' ? parsed.lastCheckedAt : null,
+        lastAppliedAt: typeof parsed.lastAppliedAt === 'string' ? parsed.lastAppliedAt : null,
+        lastMessage: typeof parsed.lastMessage === 'string' ? parsed.lastMessage : '',
+        etag: typeof parsed.etag === 'string' ? parsed.etag : null,
+        revision: typeof parsed.revision === 'string' ? parsed.revision : null,
+        contentHash: typeof parsed.contentHash === 'string' ? parsed.contentHash : null,
+      };
+    } catch (error) {
+      console.error('Error getting remote config state:', error);
+      return { ...DEFAULT_REMOTE_CONFIG_STATE };
     }
   },
 

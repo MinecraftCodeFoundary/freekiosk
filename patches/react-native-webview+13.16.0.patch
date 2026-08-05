@@ -2,7 +2,7 @@ diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactna
 index 07f73fd..275f2cd 100644
 --- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
 +++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
-@@ -144,72 +144,32 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+@@ -144,72 +144,48 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
  
      @Override
      public void onPermissionRequest(final PermissionRequest request) {
@@ -53,7 +53,7 @@ index 07f73fd..275f2cd 100644
 -
 -        requestPermissions(requestedAndroidPermissions);
 +        /**
-+         * FreeKiosk: Auto-grant all WebView media permission requests (camera, microphone,
++         * FreeKiosk: Auto-grant WebView media permission requests (camera, microphone,
 +         * protected media) without going through the native Android permission dialog.
 +         *
 +         * Why: On Fire OS (Amazon Echo Show, Fire tablets) and other non-standard Android
@@ -68,9 +68,25 @@ index 07f73fd..275f2cd 100644
 +         * - Runs in a managed kiosk context where user consent is implied
 +         *
 +         * Auto-granting is the correct behavior. The actual hardware access is still
-+         * gated by the Android-level permission (granted via pm grant or Device Owner).
++         * gated by the Android-level permission (RECORD_AUDIO/CAMERA). In particular,
++         * keep RESOURCE_AUDIO_CAPTURE in the granted list so WebRTC microphone capture
++         * can proceed after the host app has obtained RECORD_AUDIO at startup.
 +         */
-+        request.grant(request.getResources());
++        ArrayList<String> grantedPermissions = new ArrayList<>();
++        for (String requestedResource : request.getResources()) {
++            if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(requestedResource)
++                    || PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(requestedResource)
++                    || (PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID.equals(requestedResource)
++                        && mAllowsProtectedMedia)) {
++                grantedPermissions.add(requestedResource);
++            }
++        }
++
++        if (grantedPermissions.isEmpty()) {
++            request.deny();
++        } else {
++            request.grant(grantedPermissions.toArray(new String[0]));
++        }
      }
  
  
